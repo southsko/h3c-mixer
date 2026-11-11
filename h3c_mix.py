@@ -15,7 +15,8 @@ Object positions and the prime tower position are kept from the source file.
 A PrusaSlicer 3MF (FullSpectrum mixes) is routed to prusa2h3c.py, which keeps
 the designed mix ratios exactly instead of color-matching.
 
-Usage:  python h3c_mix.py file.3mf [more.3mf ...] [--no-pause]
+Usage:  python h3c_mix.py file.3mf [more.3mf ...] [--auto] [--no-pause]
+        (a chooser window opens to review/override the picks; --auto skips it)
 Needs only Python 3.8+ (no extra packages). The original file is never modified.
 """
 import json, math, os, re, sys, zipfile
@@ -122,6 +123,8 @@ def build_candidates(recipes):
             cands.append({"solid": 0, "comps": list(key), "ratios": list(r), "lab": lab})
     for c in cands:
         c["hex"] = lab_to_hex(c["lab"])
+        c["ok"] = oklch(c["hex"])
+        c["white"] = 0.0 if c["solid"] else dict(zip(c["comps"], c["ratios"])).get("White", 0) / 100.0
     return cands
 
 
@@ -150,23 +153,68 @@ KEEP_APART = 8.0        # dE separation worth preserving between source colours 
 APART_WEIGHT = 1.0
 TOP_K = 60              # candidates considered per colour
 
+# Out-of-gamut handling. A pure #0000FF or #FF0000 is far outside what C/M/Y/K/W can
+# mix; a plain colour-difference metric then happily picks a grey of the right
+# darkness, which looks wrong. Calibrated on hand picks for a saturated-primaries
+# model: people take the MOST VIVID mix near the right hue, avoid white in the
+# mix, and accept ~20 degrees of hue shift for it. Hue/chroma are judged in OKLCh,
+# whose hue lines stay straight where Lab's bend (blue/purple, red/orange).
+SAT_LO = 8.0            # OKLCh chroma below which the target is muted: plain dE2000 is right
+SAT_HI = 20.0           # ... and above which the vividness rule fully takes over
+HUE_W = 0.2             # score per degree of hue error (vividness rule)
+LIGHT_W = 0.1           # score per unit of OK lightness error (vividness rule)
+WHITE_W = 20.0          # score per 100% white in the mix (vividness rule)
+
+
+def oklch(hex_color):
+    hx = hex_color.lstrip("#")[:6]
+    c = [int(hx[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    r, g, b = [x / 12.92 if x <= 0.04045 else ((x + 0.055) / 1.055) ** 2.4 for x in c]
+    l = (0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b) ** (1 / 3)
+    m = (0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b) ** (1 / 3)
+    s = (0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b) ** (1 / 3)
+    L = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s
+    a = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s
+    bb = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s
+    return (L * 100, math.hypot(a, bb) * 100, math.degrees(math.atan2(bb, a)) % 360)
+
+
+def hue_diff(h1, h2):
+    d = abs(h1 - h2) % 360
+    return min(d, 360 - d)
+
+
+def match_score(t_lab, t_ok, c):
+    """Lower is better. Blends plain dE2000 (muted targets) with the vividness rule
+    (saturated targets) according to the target's OKLCh chroma."""
+    d = delta_e(t_lab, c["lab"])
+    Lt, Ct, Ht = t_ok
+    s = min(1.0, max(0.0, (Ct - SAT_LO) / (SAT_HI - SAT_LO)))
+    if s == 0.0:
+        return d
+    Lc, Cc, Hc = c["ok"]
+    vivid = (max(0.0, Ct - Cc) + HUE_W * hue_diff(Ht, Hc) + LIGHT_W * abs(Lt - Lc)
+             + WHITE_W * c["white"])
+    return (1 - s) * d + s * vivid
+
 
 def solve_palette(targets_hex, cands):
     T = [hex_to_lab(h) for h in targets_hex]
+    TO = [oklch(h) for h in targets_hex]
     n = len(T)
-    opts = [sorted(range(len(cands)), key=lambda c: delta_e(t, cands[c]["lab"]))[:TOP_K] for t in T]
+    opts = [sorted(range(len(cands)), key=lambda c: match_score(T[i], TO[i], cands[c]))[:TOP_K] for i in range(n)]
     want = [[min(delta_e(T[i], T[j]), KEEP_APART) for j in range(n)] for i in range(n)]
 
     def pair_pen(i, ci, j, cj):
         return APART_WEIGHT * max(0.0, want[i][j] - delta_e(cands[ci]["lab"], cands[cj]["lab"]))
 
-    pick = [o[0] for o in opts]                       # start: each colour's nearest
+    pick = [o[0] for o in opts]                       # start: each colour's best
     for _ in range(50):
         changed = False
         for i in range(n):
             best, best_cost = pick[i], None
             for c in opts[i]:
-                cost = delta_e(T[i], cands[c]["lab"]) + sum(pair_pen(i, c, j, pick[j]) for j in range(n) if j != i)
+                cost = match_score(T[i], TO[i], cands[c]) + sum(pair_pen(i, c, j, pick[j]) for j in range(n) if j != i)
                 if best_cost is None or cost < best_cost - 1e-9:
                     best, best_cost = c, cost
             if best != pick[i]:
@@ -286,8 +334,138 @@ def build_settings(base, colours, comps, ratios, n, n_phys=5):
     return P
 
 
+# ------------------------------------------------------------ colour chooser GUI
+OPTION_SPREAD = 2.5     # chooser: minimum dE between the options offered for one colour
+
+
+def gui_available():
+    try:
+        import tkinter  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def _recipe_caption(c):
+    if c["solid"]:
+        return c["comps"][0]
+    return " ".join("%s%d" % (nm[0], r) for nm, r in zip(c["comps"], c["ratios"]))
+
+
+def choose_with_gui(targets_hex, cands, default_picks, top_k=10, labels=None, _test_hook=None):
+    """Window to override the auto picks. Returns the chosen candidate dicts, or None
+    if cancelled. _test_hook(root, state) is called after the window is built."""
+    import tkinter as tk
+    n = len(targets_hex)
+    rows_opts = []
+    for i, t in enumerate(targets_hex):
+        tl, to = hex_to_lab(t), oklch(t)
+        d = default_picks[i]
+        opts = [d]
+        # best-scoring first, but skip anything that would look the same as an option
+        # already shown, so the row offers real alternatives instead of ten near-twins
+        for c in sorted(cands, key=lambda c: match_score(tl, to, c)):
+            if len(opts) >= top_k:
+                break
+            if all(delta_e(c["lab"], o["lab"]) >= OPTION_SPREAD for o in opts):
+                opts.append(c)
+        for c in cands:
+            if c["solid"] and not any(o is c for o in opts):
+                opts.append(c)
+        rows_opts.append(opts)
+
+    root = tk.Tk()
+    root.title("H3C Mixer - choose colors")
+    root.geometry("1100x750")
+    result = {"value": None}
+    sel = [next(j for j, o in enumerate(rows_opts[i]) if o is default_picks[i]) for i in range(n)]
+    swatches = [[] for _ in range(n)]
+
+    def refresh(i):
+        for j, sw in enumerate(swatches[i]):
+            on = j == sel[i]
+            col = "#1E66F5" if on else "#999999"
+            sw.config(highlightthickness=3 if on else 1, highlightbackground=col, highlightcolor=col)
+
+    def select(i, j):
+        sel[i] = j
+        refresh(i)
+
+    def finish(val):
+        result["value"] = val
+        root.destroy()
+
+    def do_convert():
+        finish([rows_opts[i][sel[i]] for i in range(n)])
+
+    def do_reset():
+        for i in range(n):
+            sel[i] = next(j for j, o in enumerate(rows_opts[i]) if o is default_picks[i])
+            refresh(i)
+
+    bar = tk.Frame(root)
+    bar.pack(side="bottom", fill="x", padx=8, pady=6)
+    tk.Button(bar, text="Convert", width=12, command=do_convert).pack(side="right", padx=4)
+    tk.Button(bar, text="Reset to auto", width=12, command=do_reset).pack(side="right", padx=4)
+    tk.Button(bar, text="Cancel", width=12, command=lambda: finish(None)).pack(side="right", padx=4)
+    tk.Label(bar, text="Click a swatch to choose the mix for each color (caption: recipe / dE).",
+             anchor="w").pack(side="left")
+
+    outer = tk.Frame(root)
+    outer.pack(side="top", fill="both", expand=True)
+    canvas = tk.Canvas(outer, highlightthickness=0)
+    vsb = tk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+    canvas.configure(yscrollcommand=vsb.set)
+    vsb.pack(side="right", fill="y")
+    canvas.pack(side="left", fill="both", expand=True)
+    inner = tk.Frame(canvas)
+    canvas.create_window((0, 0), window=inner, anchor="nw")
+    inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+    root.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(-1 if e.delta > 0 else 1, "units"))
+
+    def safe_bg(h):
+        h = (h or "").strip()[:7]
+        return h if re.fullmatch(r"#[0-9A-Fa-f]{6}", h) else "#808080"
+
+    for i, t in enumerate(targets_hex):
+        row = tk.Frame(inner, pady=4)
+        row.grid(row=i, column=0, sticky="w")
+        head = tk.Frame(row)
+        head.pack(side="left", padx=(6, 14))
+        tk.Frame(head, width=48, height=48, bg=safe_bg(t), highlightthickness=1,
+                 highlightbackground="#555555").pack()
+        tk.Label(head, text=t[:7].upper()).pack()
+        if labels:
+            tk.Label(head, text=labels[i], fg="#555555").pack()
+        tl = hex_to_lab(t)
+        for j, c in enumerate(rows_opts[i]):
+            cell = tk.Frame(row)
+            cell.pack(side="left", padx=3)
+            sw = tk.Frame(cell, width=44, height=44, bg=safe_bg(c.get("hex")), highlightthickness=1,
+                          highlightbackground="#999999", cursor="hand2")
+            sw.pack()
+            swatches[i].append(sw)
+            cap = "%s\n%.1f" % (_recipe_caption(c), delta_e(tl, c["lab"]))
+            lb = tk.Label(cell, text=cap, font=("TkDefaultFont", 8), cursor="hand2")
+            lb.pack()
+            for w in (sw, lb):
+                w.bind("<Button-1>", lambda e, i=i, j=j: select(i, j))
+        refresh(i)
+
+    root.update_idletasks()
+    w = min(1100, max(500, inner.winfo_reqwidth() + vsb.winfo_reqwidth() + 8))
+    h = min(750, inner.winfo_reqheight() + bar.winfo_reqheight() + 24)
+    root.geometry("%dx%d" % (w, h))
+    root.protocol("WM_DELETE_WINDOW", lambda: finish(None))
+    if _test_hook:
+        _test_hook(root, {"options": rows_opts, "sel": sel, "select": select,
+                          "convert": do_convert, "cancel": lambda: finish(None), "reset": do_reset})
+    root.mainloop()
+    return result["value"]
+
+
 # ---------------------------------------------------------------- converter
-def convert(src, base, recipes):
+def convert(src, base, recipes, gui=True):
     print("\n=== %s" % src)
     zin = zipfile.ZipFile(src)
     names = zin.namelist()
@@ -316,7 +494,25 @@ def convert(src, base, recipes):
     # pick recipes, merge identical ones
     remap, mixes, report = {}, [], []
     order = sorted(used)
-    picks = solve_palette([old_cols[i - 1] for i in order], build_candidates(recipes))
+    cands = build_candidates(recipes)
+    targets = [old_cols[i - 1] for i in order]
+    picks = solve_palette(targets, cands)
+    changed = 0
+    if gui:
+        chosen = False
+        if gui_available():
+            try:
+                chosen = choose_with_gui(targets, cands, [c for c, _ in picks],
+                                         labels=["filament %d" % i for i in order])
+            except Exception as e:          # no display, broken Tk, ...
+                print("No GUI available (%s) - using automatic picks." % e.__class__.__name__)
+        if chosen is not False:
+            if chosen is None:
+                zin.close()
+                print("Cancelled - nothing written.")
+                return None
+            changed = sum(1 for (c0, _), c1 in zip(picks, chosen) if c0 is not c1)
+            picks = [(c, delta_e(hex_to_lab(t), c["lab"])) for t, c in zip(targets, chosen)]
     for i, (c, de) in zip(order, picks):
         if c["solid"]:
             remap[i] = c["solid"]
@@ -395,6 +591,8 @@ def convert(src, base, recipes):
     for grp in merged:
         print("  note: colours %s are near-identical and share one filament" % ", ".join(map(str, grp)))
     print("\n%d mixed filaments, %d filament slots total." % (len(mixes), n))
+    if changed:
+        print("%d pick(s) changed by hand." % changed)
     print("Wrote: %s" % out)
 
     return out
@@ -403,6 +601,7 @@ def convert(src, base, recipes):
 def main():
     args = sys.argv[1:]
     pause = "--no-pause" not in args
+    gui = "--auto" not in args
     files = [a for a in args if not a.startswith("--")]
     try:
         if not files:
@@ -432,7 +631,7 @@ def main():
                     import prusa2h3c
                     prusa2h3c.convert(f, base)
                 else:
-                    convert(f, base, recipes)
+                    convert(f, base, recipes, gui=gui)
             except SystemExit as e:
                 print("! %s" % e)
             except Exception as e:

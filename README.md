@@ -35,6 +35,11 @@ Writes `<name>_H3C_mixed.3mf` next to the original (the original is never touche
 * All colors are solved **together**: colors that differ in the model are kept
   apart in the print instead of collapsing into one mix.
 * Matches are scored with **CIEDE2000** (set `USE_DE2000 = False` for Studio's CIE76).
+* **Out-of-gamut colors keep their hue.** A pure `#0000FF` or `#00FF06` can't be
+  mixed from C/M/Y/K/W; a plain color-difference metric would substitute a grey of
+  the right darkness. For clearly saturated targets the matcher instead scores hue
+  first, then vividness, then lightness, so blue stays blue (a violet-blue), green
+  stays green, and nothing turns grey.
 * Painted triangles are remapped at the bit level, including subdivided
   (split) triangles, so nothing is repainted or lost.
 
@@ -64,8 +69,14 @@ really looks like on your H3C.
 Drop one or more `.3mf` files onto **`Drop 3MF here.bat`** (Windows), or:
 
 ```
-python h3c_mix.py file.3mf [more.3mf ...] [--no-pause]
+python h3c_mix.py file.3mf [more.3mf ...] [--auto] [--no-pause]
 ```
+
+Before writing, a **chooser window** shows each source color next to its best
+mix candidates (recipe and dE under each swatch). The automatic pick is
+pre-selected; click another swatch to override it, then press **Convert**
+(**Reset to auto** undoes your changes, **Cancel** writes nothing). Pass `--auto`
+to skip the window and use the automatic picks (also used if no display is available).
 
 Needs Python 3.8+, no extra packages. `h3c_palette_base.json` must stay next to
 the script.
