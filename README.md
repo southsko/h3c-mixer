@@ -78,6 +78,8 @@ pre-selected; click another swatch to override it, then press **Convert**
 (**Reset to auto** undoes your changes, **Cancel** writes nothing). Pass `--auto`
 to skip the window and use the automatic picks (also used if no display is available).
 
+![Chooser window: one row per source color, auto pick outlined in blue, alternatives with recipe and dE](docs/chooser.png)
+
 Needs Python 3.8+, no extra packages. `h3c_palette_base.json` must stay next to
 the script.
 
