@@ -41,6 +41,24 @@ Writes `<name>_H3C_mixed.3mf` next to the original (the original is never touche
 The report tells you how close each color got. Dark, saturated colors (navy,
 wine red, deep purple) are outside what CMYKW can mix — those need a real spool.
 
+## PrusaSlicer FullSpectrum files
+
+Drop a **PrusaSlicer** 3MF (e.g. a FullSpectrum color-mix swatch from Printables)
+on the same `.bat` and it is routed to `prusa2h3c.py`. PrusaSlicer stores mixes as
+"virtual extruders" in `Prusa_Slicer_full_spectrum.json`, which Bambu Studio
+ignores, so those files open with wrong colors. The converter keeps the design
+**exactly** — no color matching:
+
+* each used Prusa extruder → one H3C slot with the same color (override with
+  `--colors "#0090DA,#E24585,..."` in slot order, e.g. to use PLA Palette C/M/Y)
+* each virtual extruder → a Bambu mixed filament with the **same components and
+  ratios** (Bambu allows up to 32 physical + 64 mixed slots)
+* every part keeps its extruder; object positions are kept; unused extruders are dropped
+
+Tip: print the Printables "ColorMix Sample" chart with Palette Cyan/Magenta/Yellow
+loaded as slots 1/2/3 and you get a physical reference of what every CMY ratio
+really looks like on your H3C.
+
 ## Use
 
 Drop one or more `.3mf` files onto **`Drop 3MF here.bat`** (Windows), or:

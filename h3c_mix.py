@@ -12,6 +12,8 @@ It writes <name>_H3C_mixed.3mf next to the original:
                 solved together so colors that differ in the model stay
                 different in the print instead of collapsing into one mix.
 Object positions and the prime tower position are kept from the source file.
+A PrusaSlicer 3MF (FullSpectrum mixes) is routed to prusa2h3c.py, which keeps
+the designed mix ratios exactly instead of color-matching.
 
 Usage:  python h3c_mix.py file.3mf [more.3mf ...] [--no-pause]
 Needs only Python 3.8+ (no extra packages). The original file is never modified.
@@ -245,16 +247,20 @@ EXTRUDER_RE = re.compile(r'(<metadata key="extruder" value=")(\d+)("/>)')
 
 
 # ------------------------------------------------------------ settings build
-def build_settings(base, colours, comps, ratios, n):
+def build_settings(base, colours, comps, ratios, n, n_phys=5):
+    """Project settings for n slots: the first n_phys are physical spools, the rest mixed.
+    When the physical spools are exactly the Palette W/C/M/Y/K set, the base's measured
+    per-slot values (flush matrix etc.) are kept; otherwise neutral defaults are used."""
     B = base["settings"]
     P = dict(B)
+    palette = n_phys == 5 and [c[:7].upper() for c in colours[:5]] == [h for _, h in PHYS]
     for k, m in base["slot_keys"].items():
         if k in B:
             first = B[k][:m]
-            P[k] = [x for i in range(n) for x in (B[k][i * m:(i + 1) * m] if i < 5 else first)]
+            P[k] = [x for i in range(n) for x in (B[k][i * m:(i + 1) * m] if palette and i < 5 else first)]
     for k in base["matrix_keys"]:
         if k in B:
-            P[k] = [B[k][r * 5 + c] if r < 5 and c < 5 else ("0" if r == c else "280")
+            P[k] = [B[k][r * 5 + c] if palette and r < 5 and c < 5 else ("0" if r == c else "280")
                     for r in range(n) for c in range(n)]
     for k in base["plus1_keys"]:
         if k in B:
@@ -262,14 +268,14 @@ def build_settings(base, colours, comps, ratios, n):
     for k in base["plus2_keys"]:
         if k in B:
             P[k] = [B[k][0]] + [B[k][1]] * n + [B[k][-1]]
-    m = n - 5
+    m = n - n_phys
     P["filament_colour"] = colours
     P["filament_multi_colour"] = list(colours)
     P["default_filament_colour"] = [""] * n
-    P["filament_colour_type"] = ["2"] * 5 + ["1"] * m
-    P["filament_is_mixed"] = ["0"] * 5 + ["1"] * m
-    P["filament_mixed_components"] = [""] * 5 + comps
-    P["filament_mixed_sublayer_ratios"] = [""] * 5 + ratios
+    P["filament_colour_type"] = ["2"] * n_phys + ["1"] * m
+    P["filament_is_mixed"] = ["0"] * n_phys + ["1"] * m
+    P["filament_mixed_components"] = [""] * n_phys + comps
+    P["filament_mixed_sublayer_ratios"] = [""] * n_phys + ratios
     P["filament_mixed_gradient"] = ["0"] * n
     P["filament_mixed_gradient_per_part"] = ["0"] * n
     P["filament_mixed_gradient_curve"] = [""] * n
@@ -327,8 +333,8 @@ def convert(src, base, recipes):
         shared.setdefault(remap[i], []).append(i)
     merged = [v for v in shared.values() if len(v) > 1]
     n = 5 + len(mixes)
-    if n > 32:
-        raise SystemExit("Too many distinct mixes (%d). Reduce colors first." % len(mixes))
+    if len(mixes) > 64:     # Bambu Studio: max 32 physical + 64 mixed filaments
+        raise SystemExit("Too many distinct mixes (%d, max 64). Reduce colors first." % len(mixes))
 
     colours = [h for _, h in PHYS] + [h for _, h in mixes]
     comps = [",".join(str(PHYS_IDX[c]) for c in k[0]) for k, _ in mixes]
@@ -417,7 +423,16 @@ def main():
                 print("Skipping %s (not a .3mf)" % f)
                 continue
             try:
-                convert(f, base, recipes)
+                with zipfile.ZipFile(f) as zz:
+                    is_prusa = ("Metadata/Slic3r_PE.config" in zz.namelist()
+                                and "Metadata/project_settings.config" not in zz.namelist())
+                if is_prusa:
+                    if HERE not in sys.path:
+                        sys.path.insert(0, HERE)
+                    import prusa2h3c
+                    prusa2h3c.convert(f, base)
+                else:
+                    convert(f, base, recipes)
             except SystemExit as e:
                 print("! %s" % e)
             except Exception as e:
