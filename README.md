@@ -1,9 +1,12 @@
-# H3C Mixer
+# H3C Mixer — PLA Palette CMYKW mixed-filament converter
 
 Drag-and-drop converter that takes a color-painted Bambu Studio `.3mf` and
-retargets it to a **Bambu Lab H3C** printing from five **PLA Palette** spools
-(White, Cyan, Magenta, Yellow, Black), turning every painted color into a
+retargets it to a **Bambu Lab H3C** printing from five **PLA Palette CMYKW**
+spools (Cyan, Magenta, Yellow, Black, White), turning every painted color into a
 **mixed filament**.
+
+Keywords: Bambu Lab H3C, PLA Palette CMYKW, mixed filament, color mixing,
+multi-color 3MF, MakerLab Image to 3D, Bambu Studio.
 
 Built for MakerLab "Image to 3D" exports, but it works on any painted 3MF.
 
