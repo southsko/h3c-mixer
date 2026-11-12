@@ -83,6 +83,30 @@ the script.
 > "reduced color" option can snap colors to Bambu catalog colors first, and the
 > script can only match what's in the file.
 
+## Install (no releases, just clone)
+
+You need Python 3.8 or newer with tkinter (the standard python.org installer on
+Windows includes it; tick **Add python.exe to PATH** when installing). No other
+packages are required.
+
+```
+git clone https://github.com/southsko/h3c-mixer.git
+cd h3c-mixer
+python h3c_mix.py "C:\path\to\your-model.3mf"
+```
+
+No git? Click the green **Code** button on GitHub, choose **Download ZIP**, and
+unzip it anywhere. Keep `h3c_mix.py`, `prusa2h3c.py`, `h3c_palette_base.json` and
+`Drop 3MF here.bat` together in that folder.
+
+Everyday use on Windows: drag a `.3mf` onto `Drop 3MF here.bat` (make a desktop
+shortcut to it if you like). The converted `<name>_H3C_mixed.3mf` appears next to
+the original; open it in Bambu Studio, place the prime tower, slice.
+
+To update later, run `git pull` in the folder (or download the ZIP again). If
+Bambu Studio is installed in the default location, the script automatically uses
+its current color recipe table instead of the bundled copy.
+
 ## Credits
 
 Color data and preview math follow [BambuStudio](https://github.com/bambulab/BambuStudio)
