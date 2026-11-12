@@ -60,10 +60,6 @@ ignores, so those files open with wrong colors. The converter keeps the design
   ratios** (Bambu allows up to 32 physical + 64 mixed slots)
 * every part keeps its extruder; object positions are kept; unused extruders are dropped
 
-Tip: print the Printables "ColorMix Sample" chart with Palette Cyan/Magenta/Yellow
-loaded as slots 1/2/3 and you get a physical reference of what every CMY ratio
-really looks like on your H3C.
-
 ## Use
 
 Drop one or more `.3mf` files onto **`Drop 3MF here.bat`** (Windows), or:
