@@ -640,8 +640,11 @@ def main():
                     if HERE not in sys.path:
                         sys.path.insert(0, HERE)
                     import glb2bambu
-                    f = glb2bambu.convert(f, base=base, gui=gui, **glb_opts)
-                    if f is None:
+                    res = glb2bambu.convert(f, base=base, gui=gui, **glb_opts)
+                    if res is None:
+                        continue
+                    f, make_h3c = res
+                    if not make_h3c:
                         continue
                 except SystemExit as e:
                     print("! %s" % e)

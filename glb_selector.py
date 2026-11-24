@@ -141,17 +141,62 @@ def choose(prep, curve, suggested, reason, _test_hook=None):
 
     scale.configure(command=on_slide)
 
+    # ---- options (everything is set here; nothing needs command-line flags)
+    ext = prep["P"].max(0) - prep["P"].min(0)
+    base_size = float(ext.max())
+    opt = tk.Frame(root)
+    opt.pack(fill="x", padx=10, pady=(8, 0))
+    tk.Label(opt, text="Size (longest side, mm):").pack(side="left")
+    size_var = tk.StringVar(value="%g" % round(base_size, 1))
+    size_entry = tk.Entry(opt, textvariable=size_var, width=7)
+    size_entry.pack(side="left", padx=4)
+    dims = tk.StringVar()
+    tk.Label(opt, textvariable=dims, fg="#555").pack(side="left", padx=6)
+    h3c_var = tk.BooleanVar(value=True)
+    tk.Checkbutton(opt, text="Then convert to H3C PLA Palette CMYKW mixes",
+                   variable=h3c_var).pack(side="right")
+    err = tk.StringVar()
+    tk.Label(root, textvariable=err, fg="#C0392B", anchor="w").pack(fill="x", padx=10)
+
+    def read_size():
+        try:
+            v = float(size_var.get())
+        except ValueError:
+            return None
+        return v if 5.0 <= v <= 320.0 else None
+
+    def show_dims(*_):
+        v = read_size()
+        if v is None:
+            dims.set("")
+            err.set("Enter a size between 5 and 320 mm.")
+            return
+        err.set("")
+        d = ext * (v / base_size)
+        dims.set("= %.0f x %.0f x %.0f mm" % (d[0], d[1], d[2]))
+    size_var.trace_add("write", show_dims)
+    show_dims()
+
     bar = tk.Frame(root)
     bar.pack(fill="x", padx=10, pady=8)
 
     def done(val):
         result["n"] = val
         root.destroy()
-    tk.Button(bar, text="Make file", width=14, command=lambda: done(int(n_var.get()))).pack(side="right", padx=4)
+
+    def make():
+        v = read_size()
+        if v is None:
+            err.set("Enter a size between 5 and 320 mm.")
+            size_entry.focus_set()
+            return
+        done({"n": int(n_var.get()), "size_mm": v, "make_h3c": bool(h3c_var.get())})
+    tk.Button(bar, text="Make file", width=14, command=make).pack(side="right", padx=4)
     tk.Button(bar, text="Cancel", width=12, command=lambda: done(None)).pack(side="right", padx=4)
     root.protocol("WM_DELETE_WINDOW", lambda: done(None))
     update()
     if _test_hook:
-        _test_hook(root, n_var, update, done)
+        _test_hook(root, {"n": n_var, "size": size_var, "h3c": h3c_var, "update": update,
+                          "make": make, "cancel": lambda: done(None)})
     root.mainloop()
     return result["n"]

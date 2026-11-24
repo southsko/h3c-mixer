@@ -693,30 +693,41 @@ def finalize(prep, n_colors, base, out=None):
     return out
 
 
+def rescale(prep, size_mm):
+    """Scale the prepared mesh so its longest side is size_mm (stays centred, on the bed)."""
+    cur = float((prep["P"].max(0) - prep["P"].min(0)).max())
+    if size_mm and abs(cur - size_mm) > 1e-6:
+        f = size_mm / cur
+        prep["P"] = prep["P"] * f
+        prep["area"] = prep["area"] * f * f
+
+
 def convert(path, n_colors=None, size_mm=DEFAULT_SIZE, do_smooth=True, base=None, gui=True):
-    """n_colors=None: suggest a count; with gui=True a selector window opens to confirm/change it."""
+    """Returns (written 3MF path, make_h3c) or None if cancelled.
+    gui=True: a window opens with colour count (suggested), size and the H3C option.
+    gui=False: uses n_colors (or the suggestion), size_mm, and make_h3c=True."""
     base = base or json.load(open(h3c_mix.BASE_FILE))
     prep = prepare(path, size_mm, do_smooth)
-    if n_colors is None:
-        print("Measuring how many colours this texture needs...")
-        curve, pick, reason = suggest(prep)
-        print("Suggested: %d colours (%s)" % (pick, reason))
-        n_colors = pick
-        if gui:
-            try:
-                import glb_selector
-                chosen = glb_selector.choose(prep, curve, pick, reason)
-            except ImportError as e:
-                print("No GUI available (%s) - using the suggestion." % e)
-                chosen = pick
-            except Exception as e:
-                print("Selector failed (%s) - using the suggestion." % e.__class__.__name__)
-                chosen = pick
-            if chosen is None:
-                print("Cancelled - nothing written.")
-                return None
-            n_colors = chosen
-    return finalize(prep, n_colors, base)
+    make_h3c = True
+    print("Measuring how many colours this texture needs...")
+    curve, pick, reason = suggest(prep)
+    print("Suggested: %d colours (%s)" % (pick, reason))
+    start = n_colors if n_colors in curve else pick
+    if gui:
+        try:
+            import glb_selector
+            chosen = glb_selector.choose(prep, curve, start, reason)
+        except Exception as e:
+            print("No window available (%s) - using %d colours." % (e.__class__.__name__, start))
+            chosen = {"n": start, "size_mm": size_mm, "make_h3c": True}
+        if chosen is None:
+            print("Cancelled - nothing written.")
+            return None
+        n_colors, make_h3c = chosen["n"], chosen["make_h3c"]
+        rescale(prep, chosen["size_mm"])
+    else:
+        n_colors = n_colors or pick
+    return finalize(prep, n_colors, base), make_h3c
 
 
 def parse_args(args):
@@ -747,8 +758,7 @@ def main():
             return
         for f in files:
             try:
-                if convert(f, opts["colors"], opts["size"], opts["smooth"], gui="--auto" not in args) is None:
-                    continue
+                convert(f, opts["colors"], opts["size"], opts["smooth"], gui="--auto" not in args)
             except SystemExit as e:
                 print("! %s" % e)
             except Exception as e:

@@ -28,7 +28,8 @@ Drop a `.glb` (or `.gltf`) on the same `.bat` and `glb2bambu.py` runs first:
   in OKLab, merging look-alike shades so every slot is a visibly different color,
   then cleans up stray single-triangle specks
 * welds the texture-seam vertices so the mesh is watertight for slicing
-* scales to **100 mm** on the longest side (`--size MM`), stands it up Z-up on the bed
+* scales it to the size you set in the window (default **100 mm** on the longest side) and
+  stands it up Z-up on the bed
 * writes `<name>_<N>colors.3mf` — a normal painted Bambu project with N filaments,
   usable on its own on any multi-color Bambu printer
 
@@ -50,7 +51,9 @@ a physical filament, so 32 is the ceiling. For the H3C path every color then
 becomes a mix of the 5 Palette spools, so more colors means more mixes and more
 tool changes, not more spools.
 
-Skip the window: `--colors N` uses N directly, `--auto` uses the suggestion.
+Everything is set in that window — color count, size (it shows the resulting
+W x D x H as you type), and a checkbox for whether to go on and make the H3C CMYKW
+file. Just drop the file; nothing needs adding to the `.bat`.
 
 **Works with any glTF**, not just MakerLab: `.glb` and `.gltf` (embedded,
 data-URI or side-car `.bin`/image files), textures, vertex colors and plain
@@ -120,8 +123,8 @@ Drop one or more `.3mf` files onto **`Drop 3MF here.bat`** (Windows), or:
 python h3c_mix.py file.3mf|file.glb|file.gltf [more ...] [--auto] [--no-pause] [--colors N] [--size 100]
 ```
 
-(`--colors` and `--size` only apply to `.glb`/`.gltf` input. `--auto` skips both windows:
-the GLB color-count selector and the CMYKW mix chooser.)
+The flags are optional, for scripting only; dropping a file never needs them.
+`--colors` and `--size` preset the GLB window; `--auto` skips both windows.
 
 Before writing, a **chooser window** shows each source color next to its best
 mix candidates (recipe and dE under each swatch). The automatic pick is
