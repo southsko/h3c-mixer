@@ -8,7 +8,32 @@ spools (Cyan, Magenta, Yellow, Black, White), turning every painted color into a
 Keywords: Bambu Lab H3C, PLA Palette CMYKW, mixed filament, color mixing,
 multi-color 3MF, MakerLab Image to 3D, Bambu Studio.
 
-Built for MakerLab "Image to 3D" exports, but it works on any painted 3MF.
+Built for MakerLab "Image to 3D" exports, but it works on any painted 3MF, and
+on textured **GLB** files too.
+
+## Start from the GLB, not the 3MF
+
+MakerLab offers the model as `.3mf` or `.glb`. **Use the GLB.** The 3MF has
+already had its colors snapped to Bambu's filament catalog, so detail and true
+hues are lost before this tool ever sees them. The GLB keeps the full texture.
+
+Drop a `.glb` on the same `.bat` and `glb2bambu.py` runs first:
+
+* samples the texture for every triangle (inside each triangle, so the black
+  gaps between texture islands never leak in)
+* evens out texture grain, then reduces the colors to **20** (`--colors N`)
+  with area-weighted k-means in OKLab, merging look-alike shades so every slot
+  is a visibly different color, then cleans up stray single-triangle specks
+* welds the texture-seam vertices so the mesh is watertight for slicing
+* scales to **100 mm** on the longest side (`--size MM`), stands it up Z-up on the bed
+* writes `<name>_20colors.3mf` — a normal painted Bambu project with 20 filaments,
+  usable on its own on any multi-color Bambu printer
+
+…and then hands that file to the CMYKW converter (chooser window and all), so you
+also get `<name>_20colors_H3C_mixed.3mf`. Run `python glb2bambu.py model.glb` if
+you only want the 20-color file.
+
+The GLB step needs **numpy** and **Pillow**: `pip install numpy pillow`.
 
 ## What it does
 
@@ -65,8 +90,10 @@ ignores, so those files open with wrong colors. The converter keeps the design
 Drop one or more `.3mf` files onto **`Drop 3MF here.bat`** (Windows), or:
 
 ```
-python h3c_mix.py file.3mf [more.3mf ...] [--auto] [--no-pause]
+python h3c_mix.py file.3mf|file.glb [more ...] [--auto] [--no-pause] [--colors 20] [--size 100]
 ```
+
+(`--colors` and `--size` only apply to `.glb` input.)
 
 Before writing, a **chooser window** shows each source color next to its best
 mix candidates (recipe and dE under each swatch). The automatic pick is
@@ -76,18 +103,18 @@ to skip the window and use the automatic picks (also used if no display is avail
 
 ![Chooser window: one row per source color, auto pick outlined in blue, alternatives with recipe and dE](docs/chooser.png)
 
-Needs Python 3.8+, no extra packages. `h3c_palette_base.json` must stay next to
-the script.
-
-> Tip: export the painted file with its **raw hex colors**. MakerLab's
-> "reduced color" option can snap colors to Bambu catalog colors first, and the
-> script can only match what's in the file.
+Needs Python 3.8+ (plus numpy and Pillow for `.glb` input). `h3c_palette_base.json`
+must stay next to the script.
 
 ## Install (no releases, just clone)
 
 You need Python 3.8 or newer with tkinter (the standard python.org installer on
-Windows includes it; tick **Add python.exe to PATH** when installing). No other
-packages are required.
+Windows includes it; tick **Add python.exe to PATH** when installing). For `.glb`
+input also install two packages once:
+
+```
+pip install numpy pillow
+```
 
 ```
 git clone https://github.com/southsko/h3c-mixer.git
@@ -96,12 +123,12 @@ python h3c_mix.py "C:\path\to\your-model.3mf"
 ```
 
 No git? Click the green **Code** button on GitHub, choose **Download ZIP**, and
-unzip it anywhere. Keep `h3c_mix.py`, `prusa2h3c.py`, `h3c_palette_base.json` and
-`Drop 3MF here.bat` together in that folder.
+unzip it anywhere. Keep `h3c_mix.py`, `glb2bambu.py`, `prusa2h3c.py`,
+`h3c_palette_base.json` and `Drop 3MF here.bat` together in that folder.
 
-Everyday use on Windows: drag a `.3mf` onto `Drop 3MF here.bat` (make a desktop
-shortcut to it if you like). The converted `<name>_H3C_mixed.3mf` appears next to
-the original; open it in Bambu Studio, place the prime tower, slice.
+Everyday use on Windows: drag a `.glb` or `.3mf` onto `Drop 3MF here.bat` (make a
+desktop shortcut to it if you like). The converted `<name>_H3C_mixed.3mf` appears
+next to the original; open it in Bambu Studio, place the prime tower, slice.
 
 To update later, run `git pull` in the folder (or download the ZIP again). If
 Bambu Studio is installed in the default location, the script automatically uses

@@ -15,9 +15,13 @@ Object positions and the prime tower position are kept from the source file.
 A PrusaSlicer 3MF (FullSpectrum mixes) is routed to prusa2h3c.py, which keeps
 the designed mix ratios exactly instead of color-matching.
 
-Usage:  python h3c_mix.py file.3mf [more.3mf ...] [--auto] [--no-pause]
+A textured .glb (MakerLab Image to 3D) is first painted into a <name>_20colors.3mf
+by glb2bambu.py (needs numpy + Pillow), then converted like any painted 3MF.
+
+Usage:  python h3c_mix.py file.3mf|file.glb [more ...] [--auto] [--no-pause]
+                          [--colors 20] [--size 100]     (GLB only)
         (a chooser window opens to review/override the picks; --auto skips it)
-Needs only Python 3.8+ (no extra packages). The original file is never modified.
+Needs Python 3.8+. The original file is never modified.
 """
 import json, math, os, re, sys, zipfile
 
@@ -151,6 +155,7 @@ def blend_lab(anchors, r):
 # they were (up to KEEP_APART dE), so details don't merge into one mix.
 KEEP_APART = 8.0        # dE separation worth preserving between source colours (DE2000 scale)
 APART_WEIGHT = 1.0
+APART_SLACK = 3.0       # max extra error a colour may take on to stay apart from another
 TOP_K = 60              # candidates considered per colour
 
 # Out-of-gamut handling. A pure #0000FF or #FF0000 is far outside what C/M/Y/K/W can
@@ -202,7 +207,13 @@ def solve_palette(targets_hex, cands):
     T = [hex_to_lab(h) for h in targets_hex]
     TO = [oklch(h) for h in targets_hex]
     n = len(T)
-    opts = [sorted(range(len(cands)), key=lambda c: match_score(T[i], TO[i], cands[c]))[:TOP_K] for i in range(n)]
+    opts = []
+    for i in range(n):
+        ranked = sorted(range(len(cands)), key=lambda c: match_score(T[i], TO[i], cands[c]))[:TOP_K]
+        best = match_score(T[i], TO[i], cands[ranked[0]])
+        # keep-apart may only swap to options nearly as good as the best one; it must
+        # never turn a near-black into a grey just to differ from another black
+        opts.append([c for c in ranked if match_score(T[i], TO[i], cands[c]) <= best + APART_SLACK])
     want = [[min(delta_e(T[i], T[j]), KEEP_APART) for j in range(n)] for i in range(n)]
 
     def pair_pen(i, ci, j, cj):
@@ -602,6 +613,12 @@ def main():
     args = sys.argv[1:]
     pause = "--no-pause" not in args
     gui = "--auto" not in args
+    glb_opts = {}
+    for flag, key, typ in (("--colors", "n_colors", int), ("--size", "size_mm", float)):
+        if flag in args:
+            i = args.index(flag)
+            glb_opts[key] = typ(args[i + 1])
+            del args[i:i + 2]
     files = [a for a in args if not a.startswith("--")]
     try:
         if not files:
@@ -618,8 +635,20 @@ def main():
             except Exception:
                 pass
         for f in files:
+            if f.lower().endswith(".glb"):              # textured GLB: paint it first
+                try:
+                    if HERE not in sys.path:
+                        sys.path.insert(0, HERE)
+                    import glb2bambu
+                    f = glb2bambu.convert(f, base=base, **glb_opts)
+                except SystemExit as e:
+                    print("! %s" % e)
+                    continue
+                except Exception as e:
+                    print("! Failed on %s: %r" % (f, e))
+                    continue
             if not f.lower().endswith(".3mf"):
-                print("Skipping %s (not a .3mf)" % f)
+                print("Skipping %s (not a .3mf or .glb)" % f)
                 continue
             try:
                 with zipfile.ZipFile(f) as zz:
