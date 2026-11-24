@@ -635,12 +635,14 @@ def main():
             except Exception:
                 pass
         for f in files:
-            if f.lower().endswith(".glb"):              # textured GLB: paint it first
+            if f.lower().endswith((".glb", ".gltf")):   # textured glTF: paint it first
                 try:
                     if HERE not in sys.path:
                         sys.path.insert(0, HERE)
                     import glb2bambu
-                    f = glb2bambu.convert(f, base=base, **glb_opts)
+                    f = glb2bambu.convert(f, base=base, gui=gui, **glb_opts)
+                    if f is None:
+                        continue
                 except SystemExit as e:
                     print("! %s" % e)
                     continue
@@ -648,7 +650,7 @@ def main():
                     print("! Failed on %s: %r" % (f, e))
                     continue
             if not f.lower().endswith(".3mf"):
-                print("Skipping %s (not a .3mf or .glb)" % f)
+                print("Skipping %s (not a .3mf, .glb or .gltf)" % f)
                 continue
             try:
                 with zipfile.ZipFile(f) as zz:

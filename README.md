@@ -17,21 +17,48 @@ MakerLab offers the model as `.3mf` or `.glb`. **Use the GLB.** The 3MF has
 already had its colors snapped to Bambu's filament catalog, so detail and true
 hues are lost before this tool ever sees them. The GLB keeps the full texture.
 
-Drop a `.glb` on the same `.bat` and `glb2bambu.py` runs first:
+Drop a `.glb` (or `.gltf`) on the same `.bat` and `glb2bambu.py` runs first:
 
 * samples the texture for every triangle (inside each triangle, so the black
   gaps between texture islands never leak in)
-* evens out texture grain, then reduces the colors to **20** (`--colors N`)
-  with area-weighted k-means in OKLab, merging look-alike shades so every slot
-  is a visibly different color, then cleans up stray single-triangle specks
+* **measures how many colors the texture needs and suggests a count**, then opens
+  a window where you slide from 2 to 32 colors and watch the model repaint live
+  (front and side), with the palette and an error curve marking the suggestion
+* evens out texture grain, then reduces to your count with area-weighted k-means
+  in OKLab, merging look-alike shades so every slot is a visibly different color,
+  then cleans up stray single-triangle specks
 * welds the texture-seam vertices so the mesh is watertight for slicing
 * scales to **100 mm** on the longest side (`--size MM`), stands it up Z-up on the bed
-* writes `<name>_20colors.3mf` — a normal painted Bambu project with 20 filaments,
+* writes `<name>_<N>colors.3mf` — a normal painted Bambu project with N filaments,
   usable on its own on any multi-color Bambu printer
 
 …and then hands that file to the CMYKW converter (chooser window and all), so you
-also get `<name>_20colors_H3C_mixed.3mf`. Run `python glb2bambu.py model.glb` if
-you only want the 20-color file.
+also get `<name>_<N>colors_H3C_mixed.3mf`. Run `python glb2bambu.py model.glb` if
+you only want the N-color file.
+
+![Color-count selector: live front/side preview, palette, slider, error curve with the suggestion marked](docs/glb_selector.png)
+
+**How the suggestion works.** The window plots how far the reduced colors are from
+the real texture as you add colors. The suggestion is the first count where the
+average error drops below a just-noticeable difference (about ΔE 2), or where two
+more colors barely change anything. Simple, flat-colored models get a low number;
+photo-real ones land around 14–20.
+
+**Why 32 is the maximum.** Bambu Studio allows up to **32 physical filaments** per
+project (plus up to 64 mixed filaments on top). Each color in the N-color file is
+a physical filament, so 32 is the ceiling. For the H3C path every color then
+becomes a mix of the 5 Palette spools, so more colors means more mixes and more
+tool changes, not more spools.
+
+Skip the window: `--colors N` uses N directly, `--auto` uses the suggestion.
+
+**Works with any glTF**, not just MakerLab: `.glb` and `.gltf` (embedded,
+data-URI or side-car `.bin`/image files), textures, vertex colors and plain
+material colors (combined the way the glTF spec defines), multiple meshes,
+materials and instanced/mirrored nodes, triangle strips and fans, sparse and
+quantized data, texture wrap modes and `KHR_texture_transform`. Draco- or
+meshopt-compressed files and KTX2 textures need a decoder this tool doesn't
+include; it says so and suggests re-exporting uncompressed.
 
 The GLB step needs **numpy** and **Pillow**: `pip install numpy pillow`.
 
@@ -90,10 +117,11 @@ ignores, so those files open with wrong colors. The converter keeps the design
 Drop one or more `.3mf` files onto **`Drop 3MF here.bat`** (Windows), or:
 
 ```
-python h3c_mix.py file.3mf|file.glb [more ...] [--auto] [--no-pause] [--colors 20] [--size 100]
+python h3c_mix.py file.3mf|file.glb|file.gltf [more ...] [--auto] [--no-pause] [--colors N] [--size 100]
 ```
 
-(`--colors` and `--size` only apply to `.glb` input.)
+(`--colors` and `--size` only apply to `.glb`/`.gltf` input. `--auto` skips both windows:
+the GLB color-count selector and the CMYKW mix chooser.)
 
 Before writing, a **chooser window** shows each source color next to its best
 mix candidates (recipe and dE under each swatch). The automatic pick is
@@ -123,7 +151,7 @@ python h3c_mix.py "C:\path\to\your-model.3mf"
 ```
 
 No git? Click the green **Code** button on GitHub, choose **Download ZIP**, and
-unzip it anywhere. Keep `h3c_mix.py`, `glb2bambu.py`, `prusa2h3c.py`,
+unzip it anywhere. Keep `h3c_mix.py`, `glb2bambu.py`, `glb_selector.py`, `prusa2h3c.py`,
 `h3c_palette_base.json` and `Drop 3MF here.bat` together in that folder.
 
 Everyday use on Windows: drag a `.glb` or `.3mf` onto `Drop 3MF here.bat` (make a
